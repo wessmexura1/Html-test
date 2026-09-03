@@ -13,10 +13,12 @@ html {
     background: var(--paper);
     color: var(--ink);
     font-family: "Manrope", Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
 }
 body {
     margin: 0;
     min-height: 100vh;
+    overflow-x: hidden;
 }
 .topbar {
     max-width: 1180px;
@@ -92,6 +94,8 @@ h3 {
         700 13px "Manrope",
         Arial;
     cursor: pointer;
+    min-height: 48px;
+    touch-action: manipulation;
     transition:
         transform 0.2s,
         background 0.2s;
@@ -236,6 +240,7 @@ h3 {
     font-size: clamp(22px, 4vw, 34px);
     line-height: 1.2;
     margin: 22px 0;
+    overflow-wrap: anywhere;
 }
 .code {
     background: #151515;
@@ -262,6 +267,11 @@ h3 {
     padding: 15px;
     cursor: pointer;
     transition: 0.15s;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.option span {
+    min-width: 0;
 }
 .option:hover {
     border-color: var(--ink);
@@ -304,6 +314,10 @@ h3 {
     background: #252525;
     border-radius: 5px;
     padding: 14px;
+    min-width: 0;
+}
+.result-topic > div:first-child {
+    min-width: 0;
 }
 .result-topic small,
 .result-value {
@@ -323,9 +337,22 @@ h3 {
     font-size: 10px;
     max-width: 190px;
 }
+@media (max-width: 900px) {
+    .shell {
+        margin-top: 42px;
+    }
+    .topic-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
 @media (max-width: 720px) {
+    .topbar {
+        padding: 20px 24px;
+    }
     .shell {
         margin-top: 32px;
+        margin-bottom: 60px;
+        padding: 0 24px;
     }
     .meta-grid,
     .topic-grid {
@@ -343,7 +370,169 @@ h3 {
     .result-card {
         padding: 22px;
     }
+    .question-card {
+        margin-top: 20px;
+    }
+    .question-card h2 {
+        font-size: clamp(23px, 6.6vw, 30px);
+    }
     .result-score {
         font-size: 70px;
+    }
+}
+@media (max-width: 520px) {
+    .topbar {
+        padding: 16px;
+    }
+    .brand-mark {
+        width: 29px;
+        height: 29px;
+    }
+    .shell {
+        width: 100%;
+        margin: 22px auto 40px;
+        padding: 0 16px;
+    }
+    .hero h1 {
+        margin: 16px 0 22px;
+        font-size: clamp(36px, 12vw, 52px);
+        line-height: 1;
+        overflow-wrap: anywhere;
+    }
+    .hero p {
+        font-size: 15px;
+        line-height: 1.6;
+    }
+    .actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        margin-top: 28px;
+    }
+    .actions .btn {
+        width: 100%;
+    }
+    .meta-grid {
+        margin-top: 42px;
+    }
+    .meta {
+        padding: 18px;
+    }
+    .meta strong {
+        font-size: 26px;
+    }
+    .section-head {
+        margin-bottom: 18px;
+    }
+    .section-head h2 {
+        font-size: 28px;
+        line-height: 1.1;
+    }
+    .tech-card {
+        min-height: 190px;
+        padding: 22px;
+    }
+    .tech-card h3 {
+        font-size: 36px;
+    }
+    .topic-title {
+        margin-top: 52px;
+    }
+    .topic-grid {
+        grid-template-columns: 1fr;
+    }
+    .topic {
+        min-height: auto;
+        padding: 16px;
+    }
+    .test-wrap {
+        width: 100%;
+        margin: 8px auto;
+    }
+    .progress-row {
+        margin-bottom: 9px;
+    }
+    .question-card,
+    .result-card {
+        padding: 20px 16px;
+        border-radius: 7px;
+    }
+    .question-card {
+        margin-top: 16px;
+    }
+    .q-tag {
+        font-size: 10px;
+    }
+    .question-card h2 {
+        margin: 18px 0;
+        font-size: clamp(22px, 7.2vw, 28px);
+        line-height: 1.18;
+        letter-spacing: -0.05em;
+    }
+    .options {
+        gap: 8px;
+        margin-top: 18px;
+    }
+    .option {
+        min-height: 54px;
+        gap: 11px;
+        padding: 13px 12px;
+        font-size: 14px;
+        line-height: 1.45;
+    }
+    .option input {
+        flex: 0 0 auto;
+        width: 17px;
+        height: 17px;
+        margin-top: 2px;
+    }
+    .test-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 9px;
+        margin-top: 20px;
+    }
+    .test-actions .btn {
+        width: 100%;
+        padding: 13px 8px;
+    }
+    .test-actions .btn:last-child {
+        grid-column: 1 / -1;
+    }
+    .result-score {
+        font-size: clamp(62px, 22vw, 82px);
+    }
+    .result-card p {
+        font-size: 14px;
+    }
+    .result-topic {
+        flex-direction: column;
+        gap: 12px;
+        padding: 13px;
+    }
+    .result-topic small {
+        line-height: 1.55;
+        overflow-wrap: anywhere;
+    }
+    .result-value {
+        text-align: left;
+    }
+    .route {
+        max-width: none;
+        margin-top: 4px;
+    }
+}
+@media (max-width: 360px) {
+    .shell {
+        padding: 0 12px;
+    }
+    .question-card,
+    .result-card {
+        padding: 18px 12px;
+    }
+    .test-actions {
+        grid-template-columns: 1fr;
+    }
+    .test-actions .btn:last-child {
+        grid-column: auto;
     }
 }
