@@ -1,0 +1,8 @@
+{
+  "name": "soup-html-diagnostics",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {"dev": "vite", "build": "vite build", "preview": "vite preview", "validate:questions": "node scripts/validate-questions.mjs"},
+  "devDependencies": {"vite": "^6.1.0"}
+}
