@@ -614,7 +614,7 @@ const auditedMedium = {
         ['Які два твердження про <ol> і <li> правильні?', 'Елемент <ol> створює впорядкований список.', 'Елемент <li> позначає окремий пункт списку.', 'Елемент <ol> створює невпорядкований список.', 'Елемент <li> задає початковий номер усього списку.', 'Елемент <ol> може містити пункти без <li>.'],
         ['Які два елементи використовують для рядка таблиці та звичайної комірки?', '<tr>', '<td>', '<table>', '<th>', '<caption>'],
         ['Які два атрибути об’єднують комірку з кількома стовпцями або рядками?', 'colspan', 'rowspan', 'scope', 'headers', 'span'],
-        ['Які два засоби описують назву таблиці та зв’язок заголовкової комірки з даними?', '<caption>', 'scope', '<thead>', 'colspan', 'headers'],
+        ['Які два засоби описують назву таблиці та зв’язок заголовкової комірки з даними?', '<caption>', 'scope', '<thead>', 'colspan', 'rowspan'],
     ],
     forms: [
         ['Які два атрибути <form> задають адресу та HTTP-метод надсилання?', 'action', 'method', 'enctype', 'target', 'autocomplete'],
@@ -1250,6 +1250,7 @@ const auditedTheoryHard = {
 
 function formatHtmlCode(source) {
     if (!source) return '';
+    if (source.includes('\n')) return source.trim();
     const lines = source.trim().replace(/>\s*</g, '>\n<').split('\n');
     let depth = 0;
     return lines.map((raw) => {

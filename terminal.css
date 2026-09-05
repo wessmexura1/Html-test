@@ -12,7 +12,7 @@
     -webkit-user-select: none;
 }
 .code:before {
-    content: "●  ●  ●    html-preview";
+    content: "●  ●  ●";
     position: absolute;
     left: 0;
     right: 0;

@@ -1,24 +1,67 @@
-"use strict";
-import data from "./questionData.mjs";
-const bank = data.flatMap((t) =>
-    ["easy", "medium", "hard"].flatMap((level) =>
-        t[level].map((x, i) => ({
-            id: `${t.slug}-${level}-${i}`,
-            topic: t.name,
-            slug: t.slug,
-            difficulty: level,
-            prompt: x[0],
-            options: x[1],
-            correct: x[2],
-            code: x[3] || "",
-        })),
-    ),
-);
-const topics = data.map((t) => [t.name, t.description]);
-let state = { questionIndex: 0, queue: [], answers: [], current: null, used: new Set() };
+import htmlData from "./questionData.mjs";
+import cssData from "./cssQuestionData.mjs";
+import gitData from "./gitQuestionData.mjs";
+import { DiagnosticSession } from "./diagnosticSession.mjs";
+import { ALGORITHM_VERSION, TEST_TIMES, formatScore } from "./soupEngine.mjs";
+
+const technologies = {
+    html: {
+        key: "html",
+        name: "HTML",
+        description: "Структура документа, семантика, форми, медіа, доступність і SEO.",
+        data: htmlData,
+    },
+    css: {
+        key: "css",
+        name: "CSS",
+        description: "Селектори, каскад, моделі розкладки, адаптивність та анімації.",
+        data: cssData,
+    },
+    javascript: { key: "javascript", name: "JavaScript", description: "Модуль діагностики готується.", data: null },
+    react: { key: "react", name: "React", description: "Модуль діагностики готується.", data: null },
+    git: {
+        key: "git",
+        name: "Git",
+        description: "Коміти, гілки, віддалені репозиторії, GitHub workflow та зміна історії.",
+        data: gitData,
+    },
+};
+const cssTopicPhotos = [
+    "/assets/css-topic-01.jpg",
+    "/assets/css-selectors.jpg",
+    "/assets/css-topic-03.jpg",
+    "/assets/css-topic-04.jpg",
+    "/assets/css-topic-05.jpg",
+    "/assets/css-topic-06.jpg",
+];
+let selectedTechnology = null;
+let session = null;
+let notice = "";
+let storageWarning = "";
 const app = document.querySelector("#app");
-const esc = (v) => String(v).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
-const attributes = [
+const storageKey = (kind, tech) => `soup-v${ALGORITHM_VERSION}-${kind}-${tech}`;
+function readSaved(kind, tech, fallback) {
+    try {
+        return JSON.parse(localStorage.getItem(storageKey(kind, tech))) ?? fallback;
+    } catch {
+        storageWarning = "Не вдалося прочитати збереження. Поточну діагностику можна пройти в цій вкладці.";
+        return fallback;
+    }
+}
+function writeSaved(kind, tech, value) {
+    try {
+        localStorage.setItem(storageKey(kind, tech), JSON.stringify(value));
+    } catch {
+        storageWarning = "Не вдалося зберегти прогрес на пристрої. Не закривай вкладку до завершення.";
+    }
+}
+function persist() {
+    if (session) writeSaved("session", session.technology.key, session.state);
+}
+const esc = (value) =>
+    String(value).replace(/[&<>]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[character]);
+
+const htmlAttributes = [
     "aria-labelledby",
     "aria-label",
     "autocomplete",
@@ -53,7 +96,8 @@ const attributes = [
     "width",
     "alt",
 ];
-const tags = [
+
+const htmlTags = [
     "blockquote",
     "textarea",
     "section",
@@ -108,177 +152,212 @@ const tags = [
     "h5",
     "h6",
 ];
-function displayText(value) {
+
+function displayHtmlText(value) {
     let text = esc(value);
-    const protectedTags = [];
-    text = text.replace(/&lt;[^&]*?&gt;/g, (token) => `\u0000${protectedTags.push(token) - 1}\u0000`);
-    text = text.replace(new RegExp(`\\b(${attributes.join("|")})=([\"'])?([^\\s\"']+)(?:\\2)?`, "g"), "'$1'='$3'");
-    text = text.replace(new RegExp(`\\b(${attributes.join("|")})\\b`, "g"), "'$1'");
-    text = text.replace(new RegExp(`\\b(${tags.join("|")})\\b`, "g"), "&lt;$1&gt;");
-    return text.replace(/\u0000(\d+)\u0000/g, (_, index) => protectedTags[Number(index)]);
+    const protectedFragments = [];
+    const protect = (token) => `\u0000${protectedFragments.push(token) - 1}\u0000`;
+    text = text.replace(/&lt;[^&]*?&gt;/g, protect);
+    text = text.replace(
+        new RegExp(`\\b(${htmlAttributes.join("|")})=([\"'])?([^\\s\"']+)(?:\\2)?`, "g"),
+        (_, attribute, __, attributeValue) => protect(`'${attribute}'='${attributeValue}'`),
+    );
+    text = text.replace(new RegExp(`(?<!['\\w-])(${htmlAttributes.join("|")})(?!['\\w-])`, "g"), "'$1'");
+    text = text.replace(new RegExp(`\\b(${htmlTags.join("|")})\\b`, "g"), "&lt;$1&gt;");
+    return text.replace(/\u0000(\d+)\u0000/g, (_, index) => protectedFragments[Number(index)]);
 }
-const pick = (slug, level) => bank.find((q) => q.slug === slug && q.difficulty === level && !state.used.has(q.id));
-function prepared(q) {
-    const pairs = q.options.map((text, index) => ({ text, index }));
-    for (let i = pairs.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
-    }
-    return {
-        ...q,
-        options: pairs.map((x) => x.text),
-        correct: q.correct.map((i) => pairs.findIndex((x) => x.index === i)),
-    };
+
+function displayText(value) {
+    return selectedTechnology?.key === "html" ? displayHtmlText(value) : esc(value);
 }
-function layout(c) {
-    app.innerHTML = `<div class="shell">${c}</div>`;
+
+function layout(content) {
+    app.innerHTML = `<div class="shell">${storageWarning ? `<p class="session-notice" role="status">${esc(storageWarning)}</p>` : ""}${content}</div>`;
 }
 function home() {
-    layout(
-        `<div class="hero"><div class="eyebrow">СОУП / HTML</div><h1>Перевір свої знання з <em>HTML.</em></h1><p>Діагностика проходить по 9 темах. Система починає з питань Medium, потім підбирає Easy або Hard за твоєю відповіддю.</p><div class="actions"><button class="btn" data-action="start">Пройти перевірку ↗</button><button class="btn secondary" data-action="later">Почати з нуля</button></div></div><div class="meta-grid"><div class="meta"><strong>135</strong><span>питань у базі</span></div><div class="meta"><strong>09</strong><span>тем HTML</span></div><div class="meta"><strong>3</strong><span>рівні складності</span></div></div>`,
+    selectedTechnology = null;
+    const available = Object.values(technologies).filter((t) => t.data);
+    const topicCount = available.reduce((n, t) => n + t.data.length, 0);
+    const count = available.reduce(
+        (n, t) =>
+            n + t.data.reduce((s, topic) => s + ["easy", "medium", "hard"].reduce((v, d) => v + topic[d].length, 0), 0),
+        0,
     );
+    layout(`<div class="hero">
+        <div class="eyebrow">Тестік по алгоритму соуп</div>
+        <h1>Тестік</em></h1>
+        <p>Тестік тестік тестік тестік))))</p>
+        <div class="actions"><button class="btn" data-action="technologies">Пройти перевірку ↗</button><button class="btn secondary" data-action="later">Почати з нуля</button></div>
+    </div><div class="meta-grid">
+        <div class="meta"><strong>${count}</strong><span>питань у базі</span></div>
+        <div class="meta"><strong>${topicCount}</strong><span>теми доступних технологій</span></div>
+        <div class="meta"><strong>3</strong><span>рівні складності</span></div>
+    </div>`);
 }
-function topicsScreen() {
-    layout(
-        `<div class="eyebrow">Модуль / HTML</div><div class="section-head"><h2>Діагностика HTML</h2><span class="muted">9 тем · адаптивний маршрут</span></div><div class="tech-card" data-action="html"><div><small>FRONTEND / 01</small><h3>HTML</h3><p>Структура документа, семантика, форми, медіа, доступність і SEO.</p></div></div><div class="section-head topic-title"><h2>Теми перевірки</h2></div><div class="topic-grid">${topics.map((t, i) => `<div class="topic"><small>0${i + 1}</small><h3>${t[0]}</h3><p>${t[1]}</p></div>`).join("")}</div>`,
-    );
+function technologiesScreen() {
+    selectedTechnology = null;
+    layout(`<div class="eyebrow">Діагностичні модулі</div>
+        <div class="section-head"><h2>Обери технологію</h2></div>
+        <div class="tech-grid">${Object.values(technologies)
+            .map(
+                (t) => `
+            <button class="tech-card" data-action="select-technology" data-tech="${t.key}" ${t.data ? "" : "disabled"}>
+                <h3>${t.name}</h3><p>${t.description}</p>
+                <span class="test-duration">Орієнтовно ${TEST_TIMES[t.key]} хвилин</span>
+            </button>`,
+            )
+            .join("")}</div>`);
 }
-function startTest() {
-    state = { questionIndex: 0, queue: [], answers: [], current: null, used: new Set() };
-    topics.forEach(([name]) => {
-        const q = prepared(bank.find((x) => x.topic === name && x.difficulty === "medium"));
-        state.queue.push(q);
-        state.used.add(q.id);
-    });
+function topicScreen(key) {
+    const t = technologies[key];
+    if (!t?.data) return;
+    selectedTechnology = t;
+    const saved = readSaved("session", key, null);
+    const resumable = saved?.version === ALGORITHM_VERSION && !saved.completedAt && saved.queue?.length;
+    const last = readSaved("result", key, null);
+    layout(`<div class="eyebrow">Модуль / ${t.name}</div>
+        <div class="section-head"><h2>Тестык ${t.name}</h2><span class="muted"></span></div>
+        <p class="test-duration">Орієнтовний час проходження: ${TEST_TIMES[key]} хвилин.</p>
+        <div class="module-summary"><div><strong>${t.data.length * 15}</strong><span>питань трьох рівнів у базі</span></div>
+        <div class="actions"><button class="btn" data-action="${resumable ? "resume" : "begin-test"}">${resumable ? "Продовжити діагностику" : "Почати діагностику ↗"}</button>
+        ${resumable ? '<button class="btn secondary" data-action="begin-test">Нова спроба</button>' : ""}
+        ${last ? '<button class="btn secondary" data-action="last-result">Останній результат</button>' : ""}</div></div>
+        <div class="section-head topic-title"><h2>Теми перевірки</h2></div>
+        <div class="topic-grid">${t.data.map((topic, i) => t.key === "css" && cssTopicPhotos[i]
+            ? `<div class="topic topic-image" style="--topic-photo: url('${cssTopicPhotos[i]}')"><img src="${cssTopicPhotos[i]}" alt="${topic.name}"></div>`
+            : `<div class="topic"><small>${String(i + 1).padStart(2, "0")}</small><h3>${topic.name}</h3><p>${topic.description}</p></div>`).join("")}</div>`);
+}
+function archiveAttempt(state, key, result = null) {
+    const history = readSaved("history", key, []);
+    const entry = { ...state, result };
+    const index = history.findIndex((a) => a.attemptId === state.attemptId);
+    if (index < 0) history.push(entry);
+    else history[index] = entry;
+    writeSaved("history", key, history);
+}
+function startTest(resume = false) {
+    if (!selectedTechnology?.data) return;
+    const key = selectedTechnology.key;
+    const saved = readSaved("session", key, null);
+    if (!resume && saved?.version === ALGORITHM_VERSION && saved.queue?.length) archiveAttempt(saved, key);
+    const history = readSaved("history", key, []);
+    const validSaved = resume && saved?.version === ALGORITHM_VERSION && !saved.completedAt ? saved : null;
+    session = new DiagnosticSession(selectedTechnology, { history, saved: validSaved });
+    notice = "";
+    persist();
     renderQuestion();
 }
 function renderQuestion() {
-    const q = state.queue[state.questionIndex];
-    state.current = q;
-    const n = state.questionIndex + 1,
-        total = state.queue.length,
-        multiple = q.correct.length > 1,
-        saved = state.answers.find((a) => a.id === q.id);
-    layout(
-        `<div class="test-wrap"><div class="progress-row"><span>${q.topic}</span></div><div class="progress"><span style="width:${Math.min(100, (n / total) * 100)}%"></span></div><div class="question-card"><div class="q-tag"><b>${q.difficulty.toUpperCase()}</b></div><h2>${displayText(q.prompt)}</h2>${q.code ? `<pre class="code"><code>${esc(q.code)}</code></pre>` : ""}<div class="options">${q.options.map((o, i) => `<label class="option"><input type="${multiple ? "checkbox" : "radio"}" name="answer" value="${i}" ${multiple ? 'data-max="2"' : ""} ${saved?.selected?.includes(i) ? "checked" : ""}><span>${displayText(o)}</span></label>`).join("")}</div><div class="test-actions"><button class="btn secondary" data-action="back" ${n === 1 ? "disabled" : ""}>← Назад</button><button class="btn secondary" data-action="skip">Пропустити</button><button class="btn" data-action="answer">Відповісти ↗</button></div></div></div>`,
-    );
-    const submit = app.querySelector('[data-action="answer"]');
-    if (submit) submit.disabled = !saved?.selected?.length;
-}
-function score(q, s) {
-    if (!s.length) return 0;
-    if (q.correct.length === 1) return s.length === 1 && s[0] === q.correct[0] ? 1 : 0;
-    if (s.some((i) => !q.correct.includes(i))) return 0;
-    return s.length === q.correct.length ? 1 : s.length === 1 ? 0.5 : 0;
-}
-function follow(q, sc, skipped) {
-    const history = state.answers.filter((a) => a.topic === q.topic);
-    const count = history.length;
-    if (count >= 3 && !(count === 3 && q.slug === "basics")) return;
-    let level = null;
-    if (skipped) level = "medium";
-    else if (q.difficulty === "medium") level = sc > 0 ? "hard" : "easy";
-    else if (q.difficulty === "easy" && sc === 1) level = "medium";
-    else if (q.difficulty === "hard") level = "hard";
-    const next = pick(q.slug, level);
-    if (next) {
-        state.queue.push(prepared(next));
-        state.used.add(next.id);
-    }
+    const question = session?.current;
+    if (!question) return result();
+    const state = session.state;
+    const saved = state.answers.find((a) => a.id === question.id);
+    const selected = state.drafts[question.id] ?? saved?.selected ?? [];
+    const completedTopics = selectedTechnology.data.filter(
+        (t) =>
+            state.answers.some((a) => a.slug === t.slug) &&
+            !state.queue.some((q) => q.slug === t.slug && !state.answers.some((a) => a.id === q.id)),
+    ).length;
+    layout(`<div class="test-wrap">
+        <div class="progress-row"><span>${question.topic}</span><span>Завершено тем: ${completedTopics} / ${selectedTechnology.data.length}</span></div>
+        <div class="progress" role="progressbar" aria-label="Завершені теми" aria-valuemin="0" aria-valuemax="${selectedTechnology.data.length}" aria-valuenow="${completedTopics}"><span style="width:${(completedTopics / selectedTechnology.data.length) * 100}%"></span></div>
+        ${notice ? `<p class="session-notice" role="status">${notice}</p>` : ""}
+        <div class="question-card"><div class="q-tag"><b>${question.difficulty.toUpperCase()}</b></div>
+            <h2>${displayText(question.prompt)}</h2>
+            ${question.code ? `<pre class="code"><code>${esc(question.code)}</code></pre>` : ""}
+            <div class="options">${question.options
+                .map(
+                    (o) => `<label class="option">
+                <input type="${question.correctIds.length > 1 ? "checkbox" : "radio"}" name="answer" value="${o.id}" ${question.correctIds.length > 1 ? `data-max="${question.correctIds.length}"` : ""} ${selected.includes(o.id) ? "checked" : ""}>
+                <span>${displayText(o.text)}</span></label>`,
+                )
+                .join("")}</div>
+            <div class="test-actions"><button class="btn secondary" data-action="back" ${state.questionIndex === 0 ? "disabled" : ""}>← Назад</button>
+                <button class="btn secondary" data-action="skip">Пропустити</button>
+                <button class="btn" data-action="answer" ${selected.length ? "" : "disabled"}>Відповісти ↗</button></div>
+        </div></div>`);
 }
 function answer(skipped = false) {
-    const q = state.current;
-    const s = [...document.querySelectorAll("input[name=answer]:checked")].map((x) => +x.value);
-    const sc = skipped ? 0 : score(q, s);
-    const hadAnswer = state.answers.some((a) => a.id === q.id);
-    state.answers = state.answers.filter((a) => a.id !== q.id);
-    state.answers.push({
-        id: q.id,
-        topic: q.topic,
-        slug: q.slug,
-        difficulty: q.difficulty,
-        score: sc,
-        skipped,
-        selected: skipped ? [] : s,
-    });
-    if (!hadAnswer) follow(q, sc, skipped);
-    if (state.questionIndex < state.queue.length - 1) {
-        state.questionIndex++;
-        renderQuestion();
-    } else result();
-}
-function back() {
-    if (state.questionIndex === 0) return;
-    state.questionIndex--;
+    if (!session?.current) return;
+    const selected = [...app.querySelectorAll('input[name="answer"]:checked')].map((i) => i.value);
+    const update = session.submit(selected, skipped);
+    if (!update) return;
+    notice = update.invalidated ? "Відповідь змінено. Подальші запитання цієї теми буде підібрано заново." : "";
+    persist();
     renderQuestion();
 }
-function topicResult(name) {
-    const all = state.answers.filter((a) => a.topic === name),
-        a = all.filter((x) => !x.skipped);
-    const rate = (l) => {
-        const x = a.filter((y) => y.difficulty === l);
-        return x.length ? (x.reduce((s, y) => s + y.score, 0) / x.length) * 100 : null;
-    };
-    const easy = rate("easy"),
-        medium = rate("medium"),
-        hard = rate("hard");
-    let score = null,
-        route = "потрібна додаткова перевірка";
-    const confirmedEasy = easy ?? (medium !== null ? 100 : null);
-    if (a.length >= 2 && confirmedEasy !== null && confirmedEasy < 70) score = (confirmedEasy / 70) * 64;
-    else if (a.length >= 2 && medium !== null && medium < 70) score = 65 + (medium / 70) * 19;
-    else if (a.length >= 2 && hard !== null && hard < 70) score = 65 + (hard / 70) * 19;
-    else if (a.length >= 2 && hard !== null) score = 85 + ((hard - 70) / 30) * 15;
-    else if (a.length >= 2 && medium !== null) score = 65 + (medium / 100) * 20;
-    if (score !== null)
-        route =
-            score < 65
-                ? "теорія + практика + фінальне завдання"
-                : score < 85
-                  ? "практика + фінальне завдання"
-                  : "лише фінальне завдання";
-    return { name, easy, medium, hard, score, route, answered: a.length, skipped: all.length - a.length };
+function back() {
+    if (!session || session.state.questionIndex === 0) return;
+    session.state.questionIndex--;
+    notice = "";
+    persist();
+    renderQuestion();
 }
 function result() {
-    const rows = topics.map((t) => topicResult(t[0])),
-        ok = rows.filter((r) => r.score !== null),
-        overall = ok.length ? ok.reduce((s, r) => s + r.score, 0) / ok.length : null;
-    layout(
-        `<div class="test-wrap"><div class="eyebrow">Результат / СОУП</div><div class="result-card"><div class="result-score">${overall === null ? "—" : Math.round(overall) + "%"}</div><p>${ok.length} із ${rows.length} тем оцінено. Пропущені питання не зменшують відсоток, але знижують достатність даних.</p><div class="result-list">${rows.map((r) => `<div class="result-topic"><div><strong>${r.name}</strong><small>Easy ${r.easy === null ? "—" : Math.round(r.easy) + "%"} · Medium ${r.medium === null ? "—" : Math.round(r.medium) + "%"} · Hard ${r.hard === null ? "—" : Math.round(r.hard) + "%"}</small><small>${r.answered} відповідей · ${r.skipped} пропусків</small></div><div class="result-value">${r.score === null ? "—" : Math.round(r.score) + "%"}<span class="route">${r.route}</span></div></div>`).join("")}</div></div><div class="actions"><button class="btn" data-action="home">На головну</button><button class="btn secondary" data-action="restart">Пройти ще раз</button></div></div>`,
-    );
+    if (!session) return home();
+    const report = session.result();
+    writeSaved("result", selectedTechnology.key, report);
+    archiveAttempt(session.state, selectedTechnology.key, report);
+    showResult(report);
 }
-document.addEventListener("change", (e) => {
-    if (e.target.matches('input[type="checkbox"][data-max]')) {
-        const selected = document.querySelectorAll('input[type="checkbox"][data-max]:checked').length;
-        if (selected > Number(e.target.dataset.max)) e.target.checked = false;
+function showResult(report) {
+    const complete = report.status === "Complete";
+    layout(`<div class="test-wrap"><div class="eyebrow">Результат / ${technologies[report.technology].name}</div>
+        <div class="result-card">
+            <p class="result-status">${complete ? "Діагностику завершено" : "Неповна діагностика"}</p>
+            <div class="result-score">${formatScore(report.technologyScore)}</div>
+            <p>${complete ? "Загальний результат технології." : "Середній результат лише оцінених тем. Це не оцінка всієї технології."}</p>
+            <p class="coverage">Повнота діагностики: ${formatScore(report.technologyCoverage)} · ${report.evaluatedTopics} із ${report.totalTopics} тем оцінено.</p>
+            <p>Пропуски не знижують відсоток правильності, але не підтверджують знання.</p>
+            <div class="result-list">${report.topics
+                .map(
+                    (row) => `<div class="result-topic"><div>
+                <strong>${row.name}</strong>
+                <small>Easy ${formatScore(row.easyRate)} · Medium ${formatScore(row.mediumRate)} · Hard ${formatScore(row.hardRate)}</small>
+                <small>Повні підтвердження: Medium ${row.mediumConfirmed} · Hard ${row.hardConfirmed}</small>
+                <small>${row.answeredCount} відповідей · ${row.skippedCount} пропусків</small>
+                <small>${row.dataStatus === "Evaluated" ? "Оцінено" : row.dataStatus === "NotEvaluated" ? "Тема не оцінена" : "Недостатньо даних"}</small>
+            </div><div class="result-value">${formatScore(row.topicScore)}<span class="route">${row.levelLabel}</span><span class="route">${row.learningRoute}</span></div></div>`,
+                )
+                .join("")}</div>
+        </div><div class="actions"><button class="btn" data-action="technologies">Інша технологія</button><button class="btn secondary" data-action="restart">Пройти ще раз</button></div></div>`);
+}
+document.addEventListener("change", (event) => {
+    if (!event.target.matches('input[name="answer"]') || !session?.current) return;
+    const max = session.current.correctIds.length;
+    let checked = [...app.querySelectorAll('input[name="answer"]:checked')];
+    if (checked.length > max) event.target.checked = false;
+    checked = [...app.querySelectorAll('input[name="answer"]:checked')];
+    session.state.drafts[session.current.id] = checked.map((i) => i.value);
+    const submit = app.querySelector('[data-action="answer"]');
+    if (submit) submit.disabled = !checked.length;
+    persist();
+});
+for (const eventName of ["copy", "cut", "contextmenu"]) {
+    document.addEventListener(eventName, (event) => {
+        if (event.target.closest?.(".code")) event.preventDefault();
+    });
+}
+document.addEventListener("click", (event) => {
+    const element = event.target.closest("[data-action]");
+    if (!element || element.disabled) return;
+    const action = element.dataset.action;
+    if (action === "home") home();
+    if (action === "technologies") technologiesScreen();
+    if (action === "select-technology") topicScreen(element.dataset.tech);
+    if (action === "begin-test" || action === "restart") startTest();
+    if (action === "resume") startTest(true);
+    if (action === "last-result") {
+        const report = readSaved("result", selectedTechnology.key, null);
+        if (report) showResult(report);
     }
-    if (e.target.matches('input[name="answer"]')) {
-        const submit = document.querySelector('[data-action="answer"]');
-        if (submit) submit.disabled = document.querySelectorAll('input[name="answer"]:checked').length === 0;
-    }
-});
-document.addEventListener("copy", (e) => {
-    if (e.target.closest(".code")) e.preventDefault();
-});
-document.addEventListener("cut", (e) => {
-    if (e.target.closest(".code")) e.preventDefault();
-});
-document.addEventListener("contextmenu", (e) => {
-    if (e.target.closest(".code")) e.preventDefault();
-});
-document.addEventListener("click", (e) => {
-    const a = e.target.closest("[data-action]")?.dataset.action;
-    if (!a) return;
-    if (a === "start") topicsScreen();
-    if (a === "html") startTest();
-    if (a === "answer") answer();
-    if (a === "skip") answer(true);
-    if (a === "back") back();
-    if (a === "home") home();
-    if (a === "restart") startTest();
-    if (a === "later")
+    if (action === "answer") answer();
+    if (action === "skip") answer(true);
+    if (action === "back") back();
+    if (action === "later")
         layout(
-            `<div class="hero"><div class="eyebrow">Розділ у розробці</div><h1>Навчальний маршрут з'явиться тут.</h1><p>Ти можеш пройти діагностику HTML і отримати персональний маршрут уже зараз.</p><div class="actions"><button class="btn" data-action="home">На головну</button></div></div>`,
+            `<div class="hero"><div class="eyebrow">Розділ у розробці</div><h1>Навчальний маршрут з'явиться тут.</h1><p>Діагностика вже доступна для HTML, CSS та Git.</p><button class="btn" data-action="home">На головну</button></div>`,
         );
 });
+document.querySelector(".brand")?.setAttribute("data-action", "home");
 home();
