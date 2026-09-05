@@ -27,12 +27,19 @@ const technologies = {
     },
 };
 const cssTopicPhotos = [
-    "/assets/css-topic-01.jpg",
-    "/assets/css-selectors.jpg",
-    "/assets/css-topic-03.jpg",
-    "/assets/css-topic-04.jpg",
-    "/assets/css-topic-05.jpg",
-    "/assets/css-topic-06.jpg",
+    // "/assets/css-topic-01.jpg",
+    // "/assets/css-selectors.jpg",
+    // "/assets/css-topic-03.jpg",
+    // "/assets/css-topic-04.jpg",
+    // "/assets/css-topic-05.jpg",
+    // "/assets/css-topic-06.jpg",
+
+    "/assets/css-topic-01.webp",
+    "/assets/css-selectors.webp",
+    "/assets/css-topic-03.webp",
+    "/assets/css-topic-04.webp",
+    "/assets/css-topic-05.webp",
+    "/assets/css-topic-06.webp",
 ];
 let selectedTechnology = null;
 let session = null;
